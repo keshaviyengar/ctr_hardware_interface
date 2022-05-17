@@ -42,6 +42,8 @@ class CTRHardwareInterface(object):
         if not initialize_cnc(self.dev_rot, self.dev_tr, self.verbose, self.is_lock):
             print("Translational homing failed...")
 
+        self.read_joints_timer = rospy.Timer(rospy.Duration(0.5), self.read_joints_callback)
+
     def homing_srv_callback(self, req):
         if initialize_cnc(self.dev_rot, self.dev_tr, self.verbose, self.is_lock):
             rospy.sleep(5.0)
@@ -56,6 +58,21 @@ class CTRHardwareInterface(object):
         tmp = np.multiply(self.gtx_dir[3:], alphas)
         xyz_rot_request = np.multiply(tmp, self.c_stepper[3:])
         xyz_rot_real = safe_move(self.dev_rot, xyz_rot_request, self.velRot, self.stepper_range, True, self.verbose)
+
+    def read_joints_callback(self, event):
+        betas, alphas = self.read_joint_values()
+        msg = JointState()
+        msg.header.stamp = rospy.Time.now()
+        msg.position = np.concatenate((betas, alphas))
+        self.joint_state_pub.publish(msg)
+
+    def read_joint_values(self):
+        xyz_tr = motor_position(self.dev_tr, self.verbose)
+        betas = np.multiply(xyz_tr, np.reciprocal(self.c_stepper[:3]))
+        xyz_rot = motor_position(self.dev_rot, self.verbose)
+        tmp = np.multiply(np.reciprocal(self.gtx_dir[3:]), xyz_rot)
+        alphas = tmp * np.pi * 2
+        return betas, alphas
 
 
 if __name__ == '__main__':
