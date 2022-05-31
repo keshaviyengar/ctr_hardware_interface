@@ -21,8 +21,12 @@ def motor_position(dev, report):
     output = write_read(dev, "?\n".encode("ascii"), 3, report)
     output = output[0].partition("MPos:")[2]
     output = output.split('|')[0]
-    positions = [float(x) for x in output.split(',')]
-    return positions
+    try:
+        positions = [float(x) for x in output.split(',')]
+        return positions
+    except ValueError:
+        print('Value error...')
+        print('output: ' + output)
 
 
 def intersecting_lines(x, y, x0, y0):
@@ -34,9 +38,6 @@ def intersecting_lines(x, y, x0, y0):
     # x(t) = y(t)
     # dxy[0]*t + xy[0] = dxy[1]*t + xy[1]
     t_xy = (xy0[0] - xy0[1]) / (dxy[1] - dxy[0])
-    print("xy: " + str(xy))
-    print("xy0: " + str(xy0))
-    print("t_xy: " + str(t_xy))
     # Contact midway or start at the same location and y > x
     if (1 > t_xy > 0) or (t_xy == 0 and xy[0] < xy[1]):
         xy[0] = dxy[0] * t_xy + xy0[0]
