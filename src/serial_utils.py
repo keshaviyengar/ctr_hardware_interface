@@ -2,6 +2,8 @@
 
 import numpy as np
 
+# Useful functions for reading and writing to to motor controllers
+
 
 def write_read(dev, input_val, num_lines, report):
     dev.write(input_val)
@@ -18,12 +20,13 @@ def write_read(dev, input_val, num_lines, report):
 
 
 def motor_position(dev, report):
+    # Return flipped because we want ordering innermost to outermost
     output = write_read(dev, "?\n".encode("ascii"), 3, report)
     output = output[0].partition("MPos:")[2]
     output = output.split('|')[0]
     try:
         positions = [float(x) for x in output.split(',')]
-        return positions
+        return np.flip(positions)
     except ValueError:
         print('Value error...')
         print('output: ' + output)
@@ -46,13 +49,14 @@ def intersecting_lines(x, y, x0, y0):
 
 
 def safe_move(dev, xyz, vel, motor_range, is_safe, report):
+    # TODO: Do you need high end of range when this is relative?
     if is_safe:
-        # First check single carriage constraints
         for i in range(3):
             xyz[i] = max(xyz[i], motor_range[i, 0])
             xyz[i] = min(xyz[i], motor_range[i, 1])
         # Check for overlap in carriages
-        xyz0 = motor_position(dev, report)
+        xyz = np.flip(xyz)
+        xyz0 = np.flip(motor_position(dev, report))
         # xy axes test: intersecting lines
         xyz[0:2] = intersecting_lines(xyz[0], xyz[1], xyz0[0], xyz0[1])
         # yz axes test: intersecting lines
@@ -62,8 +66,7 @@ def safe_move(dev, xyz, vel, motor_range, is_safe, report):
 
     input_val = 'G1 X' + str(xyz[0]) + ' Y' + str(xyz[1]) + ' Z' + str(xyz[2]) + 'F' + str(vel) + '\n'
     write_read(dev, input_val.encode('ascii'), 2, report)
-
-    return xyz
+    return np.flip(xyz)
 
 
 def stop_move(dev, report):
@@ -86,16 +89,15 @@ def initialize_cnc(dev_rot, dev_tr, report, is_lock=False):
 
     # Translational homing
     write_read(dev_tr, "$H\n".encode("ascii"), 3, report)
-    # Trans position should be x-1 y-1 z-1
-    print('translation (-1.0, -1.0, -1.0): ' + str(motor_position(dev_tr, True)))
-    # Rot position should be x0 y0 z0
-    print('rotation (0.0, 0.0, 0.0): ' + str(motor_position(dev_rot, True)))
     # Set to absolute position g90 (relative is g91)
     write_read(dev_tr, "g90\n".encode("ascii"), 2, report)
     write_read(dev_rot, "g90\n".encode("ascii"), 2, report)
 
     write_read(dev_tr, "g1 x-2 y-4 z-6 f1000\n".encode("ascii"), 3, report)
-    print('translation: ' + str(motor_position(dev_tr, report)))
+
+    # Trans position should be x-1 y-1 z-1
+    assert (motor_position(dev_tr, True) == np.array([-6.0, -4.0, -2.0])).all()
+    assert (motor_position(dev_rot, True) == np.array([0.0, 0.0, 0.0])).all()
 
     if is_lock:
         write_read(dev_rot, '$1=255\n', 2, report)
