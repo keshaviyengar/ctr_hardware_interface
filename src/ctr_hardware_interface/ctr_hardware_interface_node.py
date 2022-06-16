@@ -7,6 +7,7 @@ import tf2_ros
 import serial
 from serial_utils import *
 from conversion_utils import *
+from CTR_Python.Tube import Tube
 
 # 250 steps_per_mm is cnc shield constant to convert for lead screws. Instead of changing on cnc shield, dividing here.
 
@@ -14,7 +15,7 @@ from conversion_utils import *
 MOTOR_DIR = np.array([1.0, -1.0, -1.0])
 DEG2STEPS = 16.0 / (1.8 * 250.0)  # micro_steps / (deg_per_step * step_per_mm)
 MM2STEPS = 648.0 / (5.0 * 250.0)  # steps_per_rev / (mm_per_rev * micro_steps * step_per_mm)
-HOME_OFFSET = np.array([-202.0, -94.0, 0.0])
+HOME_OFFSET = np.array([-111.0, -46.0, 0.0])
 
 NUM_TUBES = 3
 
@@ -47,7 +48,14 @@ class CTRHardwareInterface(object):
         self.stepper_range = rel_beta2motor(self.ctr_range, MM2STEPS)
         self.velTr = 10000
         self.velRot = 5000
-        self.tube_lengths = np.array([-300.0, -150.0, -60.0])
+        # Load ctr robot parameters
+        # Get parameters from ROS params
+        tube_0 = Tube(**rospy.get_param("/tube_0"))
+        tube_1 = Tube(**rospy.get_param("/tube_1"))
+        tube_2 = Tube(**rospy.get_param("/tube_2"))
+        self.ctr_parameters = [tube_0, tube_1, tube_2]
+
+        self.tube_lengths = np.array([-tube_0.L, -tube_1.L, -tube_2.L])
 
         # ROS-related
         self.tr_homing_service = rospy.Service("/translation_homing", Trigger, self.tr_homing_srv_callback)
@@ -69,7 +77,6 @@ class CTRHardwareInterface(object):
             print("Translational homing failed...")
         # Test out conversion from motor2mm and mm2motor
         abs_betas, abs_alphas = self.read_joint_values()
-        print("current beta: " + str(abs_betas))
         xyz_tr = abs_beta2motor(abs_betas, HOME_OFFSET, MM2STEPS)
         abs_beta_2 = motor2abs_beta(xyz_tr, HOME_OFFSET, 1 / MM2STEPS)
         # Check conversion is same both ways
@@ -95,6 +102,7 @@ class CTRHardwareInterface(object):
     def joint_command_callback(self, msg):
         self._last_command = np.array(msg.position)
         # Apply joint limits on extension
+        self._last_command[3:] = self.extension_limits(self._last_command[3:])
         self._command_joints = True
 
     def extension_limits(self, betas):
@@ -123,7 +131,6 @@ class CTRHardwareInterface(object):
     def read_joint_values(self):
         xyz_tr = motor_position(self.dev_tr, self.verbose)
         xyz_rot = motor_position(self.dev_rot, self.verbose)
-        # betas, alphas = self.motor_to_joint(xyz_tr, xyz_rot)
         alphas = motor2alpha(xyz_rot, 1 / DEG2STEPS, MOTOR_DIR)
         betas = motor2abs_beta(xyz_tr, HOME_OFFSET, 1 / MM2STEPS)
         return betas, alphas
