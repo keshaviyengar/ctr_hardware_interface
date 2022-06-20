@@ -15,7 +15,7 @@ from CTR_Python.Tube import Tube
 MOTOR_DIR = np.array([1.0, -1.0, -1.0])
 DEG2STEPS = 16.0 / (1.8 * 250.0)  # micro_steps / (deg_per_step * step_per_mm)
 MM2STEPS = 648.0 / (5.0 * 250.0)  # steps_per_rev / (mm_per_rev * micro_steps * step_per_mm)
-HOME_OFFSET = np.array([-111.0, -46.0, 0.0])
+HOME_OFFSET = np.array([-120.0 - 80.0, -80.0, -10.0])
 
 NUM_TUBES = 3
 
@@ -55,7 +55,7 @@ class CTRHardwareInterface(object):
         tube_2 = Tube(**rospy.get_param("/tube_2"))
         self.ctr_parameters = [tube_0, tube_1, tube_2]
 
-        self.tube_lengths = np.array([-tube_0.L, -tube_1.L, -tube_2.L])
+        self.tube_lengths = np.array([tube_0.L, tube_1.L, tube_2.L])
 
         # ROS-related
         self.tr_homing_service = rospy.Service("/translation_homing", Trigger, self.tr_homing_srv_callback)
@@ -73,14 +73,22 @@ class CTRHardwareInterface(object):
         self._command_joints = False
         self._last_command = None
 
-        if not initialize_cnc(self.dev_rot, self.dev_tr, self.verbose, self.is_lock):
-            print("Translational homing failed...")
+        cnc_initialized = False
+        while not cnc_initialized:
+            cnc_initialized = initialize_cnc(self.dev_rot, self.dev_tr, self.verbose, self.is_lock)
+            if cnc_initialized:
+                break
+            print("Translational homing failed... retrying")
+
         # Test out conversion from motor2mm and mm2motor
         abs_betas, abs_alphas = self.read_joint_values()
         xyz_tr = abs_beta2motor(abs_betas, HOME_OFFSET, MM2STEPS)
         abs_beta_2 = motor2abs_beta(xyz_tr, HOME_OFFSET, 1 / MM2STEPS)
         # Check conversion is same both ways
         assert (np.array(abs_betas) == np.array(abs_beta_2)).all()
+        print("Starting joint values: ")
+        print("betas: " + str(abs_betas))
+        print("alphas: " + str(abs_alphas))
 
         print("Ready for commands!")
         self.controller_timer = rospy.Timer(rospy.Duration(0.05), self.controller_callback)
@@ -102,16 +110,17 @@ class CTRHardwareInterface(object):
     def joint_command_callback(self, msg):
         self._last_command = np.array(msg.position)
         # Apply joint limits on extension
-        self._last_command[3:] = self.extension_limits(self._last_command[3:])
+        self._last_command[:3] = self.extension_limits(self._last_command[:3])
         self._command_joints = True
 
     def extension_limits(self, betas):
+        betas[0] = max(betas[0], -270.0)
         for i in range(1, NUM_TUBES):
             # Ordering is reversed, since we have innermost as last whereas in constraints its first.
-            # Bi-1 <= Bi
-            # Bi-1 >= Bi - Li-1 + Li
-            betas[i - 1] = min(betas[i - 1], betas[i])
-            betas[i - 1] = max(betas[i - 1], self.tube_lengths[i] - self.tube_lengths[i - 1] + betas[i])
+            # Bi >= Bi-1
+            # Bi <= Bi-1 + Li-1 - Li
+            betas[i] = max(betas[i], betas[i-1])
+            betas[i] = min(betas[i], self.tube_lengths[i-1] * 1000 - self.tube_lengths[i] * 1000 + betas[i-1])
         return betas
 
     def read_joints_callback(self, req):

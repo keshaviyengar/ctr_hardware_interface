@@ -96,8 +96,9 @@ def initialize_cnc(dev_rot, dev_tr, report, is_lock=False):
     write_read(dev_tr, "g1 x-2 y-4 z-6 f1000\n".encode("ascii"), 3, report)
 
     # Trans position should be x-1 y-1 z-1
-    assert (motor_position(dev_tr, True) == np.array([-6.0, -4.0, -2.0])).all()
-    assert (motor_position(dev_rot, True) == np.array([0.0, 0.0, 0.0])).all()
+    if not (motor_position(dev_tr, True) == np.array([-6.0, -4.0, -2.0])).all() or \
+            not (motor_position(dev_rot, True) == np.array([0.0, 0.0, 0.0])).all():
+        return False
 
     if is_lock:
         write_read(dev_rot, '$1=255\n', 2, report)
