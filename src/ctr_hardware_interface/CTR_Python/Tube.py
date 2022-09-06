@@ -5,7 +5,7 @@ import numpy as np
 # This class includes physical parameters of each tube and code for segmenting them
 class Tube:
     def __init__(self, length, length_curved, diameter_inner, diameter_outer, stiffness, torsional_stiffness,
-                 x_curvature, y_curvature):
+                 x_curvature, y_curvature, beta_min, beta_max):
         self.L = length
         self.L_c = length_curved
         self.L_s = length - length_curved
@@ -17,3 +17,5 @@ class Tube:
         self.G = torsional_stiffness
         self.U_x = x_curvature
         self.U_y = y_curvature
+        self.beta_min = beta_min
+        self.beta_max = beta_max

@@ -12,40 +12,28 @@ from CTR_Python.Tube import Tube
 # 250 steps_per_mm is cnc shield constant to convert for lead screws. Instead of changing on cnc shield, dividing here.
 
 # Motor direction for translation is always 1
-MOTOR_DIR = np.array([1.0, -1.0, -1.0])
+MOTOR_DIR = np.array([-1.0, -1.0, -1.0])
 DEG2STEPS = 16.0 / (1.8 * 250.0)  # micro_steps / (deg_per_step * step_per_mm)
-MM2STEPS = 648.0 / (5.0 * 250.0)  # steps_per_rev / (mm_per_rev * micro_steps * step_per_mm)
-HOME_OFFSET = np.array([-120.0 - 80.0, -80.0, -10.0])
+MM2STEPS = 200.0 * 4.0 / (2.0 * 4) * 1 / 250.0  # steps_per_rev * micro_steps / (mm_per_rev) # Divide by 250 to cancel out default setting
+ROTATION_OFFSET = np.array([])  # offset from rotational homing
 
 NUM_TUBES = 3
 
 
 class CTRHardwareInterface(object):
     def __init__(self, com_rot, com_tr, is_lock=False):
-        # If to printout inputs and outputs to controller for debugging
-        connected = False
-        while not connected:
-            try:
-                self.dev_rot = serial.Serial(port=com_rot, baudrate=115200, timeout=10.0)
-                self.dev_tr = serial.Serial(port=com_tr, baudrate=115200, timeout=10.0)
-                connected = True
-            except serial.serialutil.SerialException:
-                connected = False
-                rospy.sleep(2.0)
-                print("Waiting for connection with controllers...")
+        self.dev_rot = serial.Serial(port=com_rot, baudrate=115200, timeout=10.0)
+        self.dev_tr = serial.Serial(port=com_tr, baudrate=115200, timeout=10.0)
         self.is_lock = is_lock
         self.verbose = False
 
         # Motor parameters
         self.gtx_dir = np.array([1, 1, 1,  # Translation
-                                 1, -1, -1])  # Rotation
-        self.c_stepper = np.array(
-            [648 * 1 / (5.0 * 250.0 * 16.0), 648 * 1 / (5.0 * 250.0 * 16.0), 648 * 1 / (5.0 * 250.0 * 16.0),
-             # Translation
-             16 * 1 / (1.8 * 250), 16 * 1 / (1.8 * 250),
-             16 * 1 / (1.8 * 250)])  # Rotation, ctr motor signal unit conversion
-        self.ctr_range = np.array([[-100, -6], [-90, -4], [-50, -2]])
-        self.stepper_range = rel_beta2motor(self.ctr_range, MM2STEPS)
+                                 -1, -1, -1])  # Rotation
+        self.ctr_range = np.array([[-97, 0], [-76, -0], [-47, 0]])
+        self.stepper_range = beta2motor(self.ctr_range, MM2STEPS)
+        print("ctr_range: " + str(self.ctr_range))
+        print("stepper_range: " + str(self.stepper_range))
         self.velTr = 10000
         self.velRot = 5000
         # Load ctr robot parameters
@@ -53,9 +41,8 @@ class CTRHardwareInterface(object):
         tube_0 = Tube(**rospy.get_param("/tube_0"))
         tube_1 = Tube(**rospy.get_param("/tube_1"))
         tube_2 = Tube(**rospy.get_param("/tube_2"))
-        self.ctr_parameters = [tube_0, tube_1, tube_2]
 
-        self.tube_lengths = np.array([tube_0.L, tube_1.L, tube_2.L])
+        #self.tube_lengths = np.array([tube_0.L, tube_1.L, tube_2.L])
 
         # ROS-related
         self.tr_homing_service = rospy.Service("/translation_homing", Trigger, self.tr_homing_srv_callback)
@@ -82,8 +69,8 @@ class CTRHardwareInterface(object):
 
         # Test out conversion from motor2mm and mm2motor
         abs_betas, abs_alphas = self.read_joint_values()
-        xyz_tr = abs_beta2motor(abs_betas, HOME_OFFSET, MM2STEPS)
-        abs_beta_2 = motor2abs_beta(xyz_tr, HOME_OFFSET, 1 / MM2STEPS)
+        xyz_tr = beta2motor(abs_betas, MM2STEPS)
+        abs_beta_2 = motor2beta(xyz_tr, 1 / MM2STEPS)
         # Check conversion is same both ways
         assert (np.array(abs_betas) == np.array(abs_beta_2)).all()
         print("Starting joint values: ")
@@ -114,13 +101,14 @@ class CTRHardwareInterface(object):
         self._command_joints = True
 
     def extension_limits(self, betas):
-        betas[0] = max(betas[0], -270.0)
-        for i in range(1, NUM_TUBES):
-            # Ordering is reversed, since we have innermost as last whereas in constraints its first.
-            # Bi >= Bi-1
-            # Bi <= Bi-1 + Li-1 - Li
-            betas[i] = max(betas[i], betas[i-1])
-            betas[i] = min(betas[i], self.tube_lengths[i-1] * 1000 - self.tube_lengths[i] * 1000 + betas[i-1])
+        #betas = np.flip(betas)
+        #for i in range(1, NUM_TUBES):
+        #    # Ordering is reversed, since we have innermost as last whereas in constraints its first.
+        #    # Bi >= Bi-1
+        #    # Bi <= Bi-1 + Li-1 - Li
+        #    betas[i-1] = max(betas[i-1], betas[i])
+        #    betas[i-1] = min(betas[i-1], self.tube_lengths[i] * 1000 - self.tube_lengths[i-1] * 1000 + betas[i])
+        #betas = np.flip(betas)
         return betas
 
     def read_joints_callback(self, req):
@@ -141,24 +129,8 @@ class CTRHardwareInterface(object):
         xyz_tr = motor_position(self.dev_tr, self.verbose)
         xyz_rot = motor_position(self.dev_rot, self.verbose)
         alphas = motor2alpha(xyz_rot, 1 / DEG2STEPS, MOTOR_DIR)
-        betas = motor2abs_beta(xyz_tr, HOME_OFFSET, 1 / MM2STEPS)
+        betas = motor2beta(xyz_tr, 1 / MM2STEPS)
         return betas, alphas
-
-    def motor_to_joint(self, xyz_tr, xyz_rot):
-        betas = np.multiply(xyz_tr, np.reciprocal(self.c_stepper[:3]))
-        alphas_rel = np.multiply(np.reciprocal(self.c_stepper[3:]), xyz_rot)
-        tmp = np.multiply(np.reciprocal(self.gtx_dir[3:]), alphas_rel)
-        alphas = tmp * np.pi / 180.0
-        return betas, alphas
-
-    def joint_to_motor(self, betas, alphas):
-        # Get relative betas as how done for carriage
-        betas = np.flip(betas)
-        alphas = np.flip(alphas) / np.pi * 180.0
-        xyz_tr = np.multiply(betas, self.c_stepper[:3])
-        tmp = np.multiply(self.gtx_dir[3:], alphas)
-        xyz_rot = np.multiply(tmp, self.c_stepper[3:])
-        return xyz_tr, xyz_rot
 
     # Callback for all controller communication to avoid overloading ports
     def controller_callback(self, event):
@@ -177,52 +149,59 @@ class CTRHardwareInterface(object):
             self.publish_joint_state(betas, alphas)
             self._read_joints = False
         if self._command_joints:
-            xyz_tr_req = abs_beta2motor(self._last_command[:3], HOME_OFFSET, MM2STEPS)
+            xyz_tr_req = beta2motor(self._last_command[:3], MM2STEPS)
             xyz_rot_req = alpha2motor(self._last_command[3:], DEG2STEPS, MOTOR_DIR)
             xyz_rot_real = safe_move(self.dev_rot, xyz_rot_req, self.velRot, self.stepper_range, False, self.verbose)
             xyz_tr_real = safe_move(self.dev_tr, xyz_tr_req, self.velTr, self.stepper_range, True, self.verbose)
-            betas = motor2abs_beta(xyz_tr_real, HOME_OFFSET, 1 / MM2STEPS)
+            betas = motor2beta(xyz_tr_real, 1 / MM2STEPS)
             alphas = motor2alpha(xyz_rot_real, 1 / DEG2STEPS, MOTOR_DIR)
             self.publish_joint_state(betas, alphas)
             self._command_joints = False
 
-    def calibrate_rot_offset(self, beta, tube, offsets):
-        offset_rot = 0
-        max_x = -np.inf
-        rot_value = np.array([0.0, 0.0, 0.0]) + offsets
-        for i in range(0, 180, 5):
-            rot_value[tube] = float(i)
-            xyz_tr_req, xyz_rot_req = self.joint_to_motor(beta, np.deg2rad(rot_value))
-            xyz_rot_real = safe_move(self.dev_rot, xyz_rot_req, self.velRot, self.stepper_range, False, self.verbose)
-            # Get transform from tf frame for current tracker position
-            try:
-                trans = self.tfBuffer.lookup_transform("aurora_marker1", "base_link", rospy.Time())
-            except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
-                print("TF2 lookup failed...")
-                continue
-            if trans.transform.translation.x > max_x:
-                max_x = trans.transform.translation.x
-                print(max_x)
-                offset_rot = i
-            rospy.sleep(1.5)
-        return offset_rot
-
     def initialize_rot(self):
-        # Use configuration [-70.0, -30.0, -2.0]
-        betas_rot_init = np.array([-70.0, -30.0, -2.0])
-        xyz_tr_req, xyz_rot_req = self.joint_to_motor(betas_rot_init, np.array([0.0, 0.0, 0.0]))
-        xyz_tr_real = safe_move(self.dev_tr, xyz_tr_req, self.velTr, self.stepper_range, True, self.verbose)
-        xyz_rot_real = safe_move(self.dev_rot, xyz_rot_req, self.velRot, self.stepper_range, False, self.verbose)
+        # Homing beta configurations, retract tubes to have tracker at tip of current tube.
+        # Ordering outer to inner
+        betas_rot_homing = np.array([[-1.0, -1.0, -1.0], [-54.0, -1.0, -1.0], [-82.0, -27.0, -1.0]])
+        # Run rotational homing and set zero position
+        alpha_range = 10.0
+        min_y_val = np.array([np.inf, np.inf, np.inf])
+        zero_joints = np.zeros(3)
         rospy.sleep(5.0)
-        offsets = np.array([0.0, 0.0, 0.0])
-        for tube in range(2, -1, -1):
-            print("offsets: ", str(offsets))
-            offsets[tube] = self.calibrate_rot_offset(betas_rot_init, tube, offsets)
-        # Move to zero position
-        xyz_tr_req, xyz_rot_req = self.joint_to_motor(betas_rot_init, offsets)
-        xyz_tr_real = safe_move(self.dev_tr, xyz_tr_req, self.velTr, self.stepper_range, False, self.verbose)
-        xyz_rot_real = safe_move(self.dev_rot, xyz_rot_req, self.velRot, self.stepper_range, False, self.verbose)
-        return offsets
+        rospy.loginfo("waiting 5 seconds...")
+        for i in range(NUM_TUBES-1, -1, -1):
+            print("Tube " + str(i) + " rotation.")
+            xyz_tr_req = beta2motor(betas_rot_homing[i], MM2STEPS)
+            xyz_tr_real = safe_move(self.dev_tr, xyz_tr_req, self.velTr, self.stepper_range, True, self.verbose)
+            betas = motor2beta(xyz_tr_real, 1 / MM2STEPS)
+            rospy.sleep(2.0)
+            for j in np.linspace(-alpha_range, alpha_range, 30):
+                rot_command = np.zeros(3)
+                rot_command[i] = j
+                xyz_rot_req = alpha2motor(rot_command, DEG2STEPS, MOTOR_DIR)
+                xyz_rot_real = safe_move(self.dev_rot, xyz_rot_req, self.velRot, self.stepper_range, False, self.verbose)
+                # Get five measurements and average
+                num_samples = 5
+                y_samples = np.zeros(num_samples)
+                for k in range(num_samples):
+                    try:
+                        trans = self.tfBuffer.lookup_transform("entry_point", "aurora_marker1", rospy.Time())
+                        y_samples[k] = trans.transform.translation.y
+                    except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+                        rospy.logerr("TF2 lookup failed...")
+                        continue
+                    rospy.sleep(1.0 / num_samples)
+                rospy.loginfo("mean y_values: " + str(np.mean(np.abs(y_samples))))
+                if np.mean(np.abs(y_samples)) <= min_y_val[i]:
+                    min_y_val[i] = np.mean(np.abs(y_samples))
+                    print("New alignment!: " + str(min_y_val))
+                    zero_joints[i] = j
+            rospy.loginfo("zero_joints" + str(zero_joints))
+            rospy.loginfo("Moving to new home position...")
+            xyz_rot_req = alpha2motor(zero_joints, DEG2STEPS, MOTOR_DIR)
+            xyz_rot_real = safe_move(self.dev_rot, xyz_rot_req, self.velRot, self.stepper_range, False, self.verbose)
+            rospy.sleep(2.0)
+        rospy.loginfo('min_x_values: ' + str(min_y_val))
+        return zero_joints
 
 
 if __name__ == '__main__':

@@ -1,2 +1,5 @@
 *.idea/
 *.pyc
+src/ctr_hardware_interface/planar/
+src/ctr_hardware_interface/random/
+src/ctr_hardware_interface/single_tube_rotation/

@@ -50,12 +50,13 @@ def intersecting_lines(x, y, x0, y0):
 
 def safe_move(dev, xyz, vel, motor_range, is_safe, report):
     # TODO: Do you need high end of range when this is relative?
+    xyz = np.flip(xyz)
+    motor_range = np.flip(motor_range, axis=0)
     if is_safe:
         for i in range(3):
             xyz[i] = max(xyz[i], motor_range[i, 0])
             xyz[i] = min(xyz[i], motor_range[i, 1])
         # Check for overlap in carriages
-        xyz = np.flip(xyz)
         xyz0 = np.flip(motor_position(dev, report))
         # xy axes test: intersecting lines
         xyz[0:2] = intersecting_lines(xyz[0], xyz[1], xyz0[0], xyz0[1])

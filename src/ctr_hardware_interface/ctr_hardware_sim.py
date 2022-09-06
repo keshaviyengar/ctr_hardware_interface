@@ -84,12 +84,12 @@ class ConcentricTubeRobotSimNode(object):
 
     def joint_state_callback(self, msg):
         self.betas = np.array(msg.position[:3]) / 1000.0
-        self.alphas = np.array(msg.position[3:])
+        self.alphas = np.deg2rad(np.array(msg.position[3:]))
 
     def broadcast_tip_position(self, tip_pose):
         t = TransformStamped()
         t.header.stamp = rospy.Time.now()
-        t.header.frame_id = "base_link"
+        t.header.frame_id = "entry_point"
         t.child_frame_id = "sim_marker"
         t.transform.translation.x = tip_pose[0]
         t.transform.translation.y = tip_pose[1]
@@ -104,7 +104,7 @@ class ConcentricTubeRobotSimNode(object):
         msg = JointState()
         msg.header.stamp = rospy.Time.now()
         msg.name = ['beta_0', 'beta_1', 'beta_2', 'alpha_0', 'alpha_1', 'alpha_2']
-        msg.position = np.concatenate((betas, alphas))
+        msg.position = np.concatenate((betas, np.rad2deg(alphas)))
         self.joint_state_pub.publish(msg)
 
     # Callback for all controller communication to avoid overloading ports

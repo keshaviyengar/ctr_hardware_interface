@@ -25,7 +25,7 @@ class CTRModel(object):
 
         # Use this command if you wish to use initial value problem (ivp) solver (less accurate but faster)
         CTR = CTR_Model(self.systems[0][0], self.systems[0][1], self.systems[0][2], f, q, q_0, 0.01, 1)
-        cost = CTR.minimize(np.concatenate((u1_xy_0, uz_0), axis=None))
+        cost = CTR.minimize(np.concatenate((u1_xy_0, uz_0)
         return CTR.r[-1]
 
         :param joint: Current joint position of robot [beta_0, ..., beta_2, alpha_0, ..., alpha_2]
@@ -33,7 +33,7 @@ class CTRModel(object):
         :return: End effector position or achieved goal of selected system.
         """
         # position of tubes' base from template (i.e., s=0)
-        q_0 = np.array([0, 0, 0, 0, 0, 0])
+        q_0 = np.array([0, 0, 0, np.pi/2, np.pi/2, np.pi/2])
         beta = joint[0:3] + q_0[0:3]
 
         segment = Segment(self.ctr_parameters[0], self.ctr_parameters[1], self.ctr_parameters[2], beta)
