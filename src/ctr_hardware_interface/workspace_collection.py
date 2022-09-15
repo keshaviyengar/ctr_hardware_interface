@@ -103,16 +103,39 @@ class WorkspaceCollection(object):
         B_rotate = np.zeros((alpha_step, 3))
         return B_rotate, alpha_rotate
 
+    # Extend in follow-the-leader approach. Extend outer first, extend middle finally extend inner
+    def tube_extend_sampling(self, beta_max, beta_step):
+        L_margin = np.array([136.5 - 15.0, 77.0 - 5.0, 47.5])
+        # Fully retracted position
+        retracted = -L_margin
+        # Fully extend outer tube
+        beta_extend_2 = np.array([np.linspace(retracted[0], retracted[0] - retracted[2], int(beta_step / 3)),
+                                  np.linspace(retracted[1], retracted[1] - retracted[2], int(beta_step / 3)),
+                                  np.linspace(retracted[2], beta_max, int(beta_step / 3)),
+                                  ])
+        # Fully extend middle tube
+        beta_extend_1 = np.array([np.linspace(retracted[0] - retracted[2], retracted[0] - retracted[1], int(beta_step / 3)),
+                                  np.linspace(retracted[1] - retracted[2], -1.0, int(beta_step / 3)),
+                                  np.linspace(beta_max, beta_max, int(beta_step / 3))
+                                  ])
+        # Fully extend inner tube
+        beta_extend_0 = np.array([np.linspace(retracted[0] - retracted[1], beta_max, int(beta_step / 3)),
+                                  np.linspace(beta_max, beta_max, int(beta_step / 3)),
+                                  np.linspace(beta_max, beta_max, int(beta_step / 3))
+                                  ])
+        betas_extend = np.concatenate((np.concatenate((beta_extend_2, beta_extend_1), axis=1), beta_extend_0), axis=1)
+        alphas_extend = np.zeros_like(betas_extend)
+        return betas_extend.T, alphas_extend.T
+
     def explore_workspace(self, betas, alphas):
         # Move to first position and wait
         msg = JointState()
         msg.header.stamp = rospy.Time.now()
         msg.name = ['beta_0', 'beta_1', 'beta_2', 'alpha_0', 'alpha_1', 'alpha_2']
-        #msg.position = np.concatenate((np.flip(betas[0, :]), np.flip(alphas[0, :])))
         msg.position = np.concatenate((betas[0, :], alphas[0, :]))
         rospy.loginfo(msg.position)
         self.joint_command_pub.publish(msg)
-        rospy.sleep(5.0)
+        rospy.sleep(20.0)
         count = 1
         total_count = len(betas) - 1
         for prev_beta, prev_alpha, beta, alpha in zip(betas, alphas, betas[1:], alphas[1:]):
@@ -127,7 +150,7 @@ class WorkspaceCollection(object):
             msg = JointState()
             msg.header.stamp = rospy.Time.now()
             msg.name = ['beta_0', 'beta_1', 'beta_2', 'alpha_0', 'alpha_1', 'alpha_2']
-            #msg.position = np.concatenate((np.flip(beta), np.flip(alpha)))
+            # msg.position = np.concatenate((np.flip(beta), np.flip(alpha)))
             msg.position = np.concatenate((beta, alpha))
             rospy.loginfo(msg.position)
             self.joint_command_pub.publish(msg)
@@ -206,16 +229,16 @@ if __name__ == '__main__':
     # Transmission for systems
     u_alpha = 16.0 / (1.8 * 250.0)  # micro_steps / (deg_per_step * step_per_mm)
     u_beta = 200.0 * 4.0 / (
-                2.0 * 4) * 1 / 250.0  # steps_per_rev * micro_steps / (mm_per_rev) # Divide by 250 to cancel out default setting
+            2.0 * 4) * 1 / 250.0  # steps_per_rev * micro_steps / (mm_per_rev) # Divide by 250 to cancel out default setting
     # weights for distance
     w = np.array([0.1, 0.1, 0.1, 0.4, 0.2, 0.1])
     # Number of samples
-    n_samples = 10
-    alpha_max = np.rad2deg(np.pi/3)
+    n_samples = 200
+    alpha_max = np.rad2deg(np.pi / 3)
     # Length of tubes, considering a margin of 5mm for innermost tube. Ordered outermost to innermost
     L_star = np.array([47.5, 77.0 - 5.0, 136.5 - 15.0])
     image_topic = "usb_cam/image_raw"
-    sample_method = 'single_tube_rotation'
+    sample_method = 'random'
     # Create log path
     log_path = sample_method + '/' + datetime.now().strftime("%d_%m_%y_%H%M") + "/"
     os.mkdir(log_path)
@@ -224,13 +247,16 @@ if __name__ == '__main__':
     if sample_method == 'random':
         B_sorted, alphas_sorted, sorted_order = workspace_collector.sorted_sampling(u_beta, u_alpha, L_star, w)
         # Based on random sampling, collect shortest path to all joint values
-        workspace_collector.explore_workspace(B_sorted, alphas_sorted)
+        workspace_collector.explore_workspace(np.flip(B_sorted), np.flip(alphas_sorted))
     elif sample_method == 'planar':
         B_planar, alphas_planar = workspace_collector.planar_sampling(alpha_max, n_samples)
         workspace_collector.explore_workspace(B_planar, alphas_planar)
     elif sample_method == 'single_tube_rotation':
         B_single_tube, alphas_single_tube = workspace_collector.tube_rotate_sampling(alpha_max, n_samples, tube=0)
         workspace_collector.explore_workspace(B_single_tube, alphas_single_tube)
+    elif sample_method == 'extension':
+        B_single_extend, alphas_single_extend = workspace_collector.tube_extend_sampling(-2.0, 60)
+        workspace_collector.explore_workspace(B_single_extend, alphas_single_extend)
     else:
         rospy.loginfo("Incorrect sample method chosen...")
     rospy.spin()
